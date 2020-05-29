@@ -9,10 +9,8 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
 use url::Url;
-
-use retry::delay::{jitter, Fibonacci};
-use retry::{retry, OperationResult};
 
 pub use crate::utils::utils::raw::{
     find_cmd, has_cmd, if_not_empty, is_directory, is_file, path_exists, prefix_arg, random_string,
@@ -90,12 +88,16 @@ pub fn rename_file<'a, N>(
     name: &'static str,
     src: &'a Path,
     dest: &'a Path,
-    notify: &'a dyn Fn(N),
+    _notify: &'a dyn Fn(N),
 ) -> Result<()>
 where
     N: From<Notification<'a>>,
 {
-    rename(name, src, dest, notify)
+    fs::rename(src, dest).chain_err(|| ErrorKind::RenamingFile {
+        name,
+        src: PathBuf::from(src),
+        dest: PathBuf::from(dest),
+    })
 }
 
 pub fn rename_dir<'a, N>(
@@ -107,7 +109,35 @@ pub fn rename_dir<'a, N>(
 where
     N: From<Notification<'a>>,
 {
-    rename(name, src, dest, notify)
+    // Some AVs inadvertently prevent renaming directories by
+    // opening file handles on files within the directory that
+    // needs to be renamed.
+    // We work around that by retrying the rename until success.
+    let mut result = Ok(());
+    let mut notified = false;
+
+    for _ in 0..300_000 {
+        result = fs::rename(src, dest);
+        if let Err(e) = &result {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                if !notified {
+                    notify(Notification::RenameInUse(&src, &dest).into());
+                    notified = true;
+                }
+                // yield this thread's timeslice back to the OS
+                // so it can run another thread.
+                thread::yield_now();
+                continue;
+            }
+        }
+        break;
+    }
+
+    result.chain_err(|| ErrorKind::RenamingFile {
+        name,
+        src: PathBuf::from(src),
+        dest: PathBuf::from(dest),
+    })
 }
 
 pub fn filter_file<F: FnMut(&str) -> bool>(
@@ -571,39 +601,6 @@ pub fn toolchain_sort<T: AsRef<str>>(v: &mut Vec<T>) {
         let b_key = toolchain_sort_key(b_str);
         a_key.cmp(&b_key)
     });
-}
-
-fn rename<'a, N>(
-    name: &'static str,
-    src: &'a Path,
-    dest: &'a Path,
-    notify_handler: &'a dyn Fn(N),
-) -> Result<()>
-where
-    N: From<Notification<'a>>,
-{
-    // https://github.com/rust-lang/rustup/issues/1870
-    // 21 fib steps from 1 sums to ~28 seconds, hopefully more than enough
-    // for our previous poor performance that avoided the race condition with
-    // McAfee and Norton.
-    retry(
-        Fibonacci::from_millis(1).map(jitter).take(21),
-        || match fs::rename(src, dest) {
-            Ok(()) => OperationResult::Ok(()),
-            Err(e) => match e.kind() {
-                io::ErrorKind::PermissionDenied => {
-                    notify_handler(Notification::RenameInUse(&src, &dest).into());
-                    OperationResult::Retry(e)
-                }
-                _ => OperationResult::Err(e),
-            },
-        },
-    )
-    .chain_err(|| ErrorKind::RenamingFile {
-        name,
-        src: PathBuf::from(src),
-        dest: PathBuf::from(dest),
-    })
 }
 
 pub fn delete_dir_contents(dir_path: &Path) {
