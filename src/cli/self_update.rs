@@ -44,6 +44,9 @@ mod os {
     pub(crate) use super::windows::*;
 }
 
+#[cfg(windows)]
+pub(crate) use os::ensure_prompt;
+
 use std::borrow::Cow;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
@@ -448,15 +451,6 @@ pub(crate) fn install(
     if let Err(e) = install_res {
         common::report_error(&e);
 
-        // On windows, where installation happens in a console
-        // that may have opened just for this purpose, give
-        // the user an opportunity to see the error before the
-        // window closes.
-        #[cfg(windows)]
-        if !no_prompt {
-            ensure_prompt()?;
-        }
-
         return Ok(utils::ExitCode(1));
     }
 
@@ -482,14 +476,6 @@ pub(crate) fn install(
         format!(post_install_msg_unix!(), cargo_home = cargo_home)
     };
     md(&mut term, msg);
-
-    #[cfg(windows)]
-    if !no_prompt {
-        // On windows, where installation happens in a console
-        // that may have opened just for this purpose, require
-        // the user to press a key to continue.
-        ensure_prompt()?;
-    }
 
     Ok(utils::ExitCode(0))
 }

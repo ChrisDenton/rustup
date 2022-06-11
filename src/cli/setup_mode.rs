@@ -138,5 +138,13 @@ pub fn main() -> Result<utils::ExitCode> {
         warn!("{}", common::WARN_COMPLETE_PROFILE);
     }
 
-    self_update::install(no_prompt, verbose, quiet, opts)
+    let result = self_update::install(no_prompt, verbose, quiet, opts);
+    #[cfg(windows)]
+    if !no_prompt {
+        // On windows, where installation happens in a console
+        // that may have opened just for this purpose, require
+        // the user to press a key to continue.
+        let _ = self_update::ensure_prompt();
+    }
+    result
 }
