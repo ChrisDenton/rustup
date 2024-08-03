@@ -95,7 +95,12 @@ zstd = "0.13"
 
 [target."cfg(windows)".dependencies]
 cc = "1"
-winreg = "0.52"
+windows-registry = "0.2.0"
+windows-result = "0.2.0"
+
+[patch.crates-io]
+windows-registry = { git = "https://github.com/microsoft/windows-rs.git" }
+windows-result = { git = "https://github.com/microsoft/windows-rs.git" }
 
 [target."cfg(windows)".dependencies.windows-sys]
 features = [
