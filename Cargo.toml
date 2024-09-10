@@ -16,7 +16,7 @@ default = [
   "curl-backend",
   "reqwest-backend",
   "reqwest-native-tls",
-  "reqwest-rustls-tls",
+  #"reqwest-rustls-tls",
 ]
 
 reqwest-backend = ["download/reqwest-backend"]
