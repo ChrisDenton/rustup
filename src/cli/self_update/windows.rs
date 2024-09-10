@@ -5,14 +5,13 @@ use std::io::Write;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::process::Command;
-use std::slice;
 use std::sync::{Arc, Mutex};
 #[cfg(any(test, feature = "test"))]
 use std::sync::{LockResult, MutexGuard};
 
 use anyhow::{anyhow, Context, Result};
 use tracing::{info, warn};
-use windows_registry::{Key, Type, Value, CURRENT_USER};
+use windows_registry::{Key, Type, Value, CURRENT_USER, HSTRING};
 use windows_result::HRESULT;
 use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 
@@ -480,7 +479,8 @@ fn _apply_new_path(new_path: Option<Vec<u16>>) -> Result<()> {
     if new_path.is_empty() {
         environment.remove_value("PATH")?;
     } else {
-        environment.set_bytes("PATH", Type::ExpandString, &to_winreg_bytes(new_path))?;
+        let new_path = HSTRING::from_wide(&new_path);
+        environment.set_expand_hstring("PATH", &new_path)?;
     }
 
     // Tell other processes to update their environment
@@ -620,12 +620,8 @@ pub(crate) fn do_add_to_programs(process: &Process) -> Result<()> {
     uninstall_cmd.push(path);
     uninstall_cmd.push("\" self uninstall");
 
-    key.set_bytes(
-        "UninstallString",
-        Type::String,
-        &to_winreg_bytes(uninstall_cmd.encode_wide().collect()),
-    )
-    .context("Failed to set `UninstallString`")?;
+    key.set_hstring("UninstallString", &HSTRING::from(&uninstall_cmd))
+        .context("Failed to set `UninstallString`")?;
     key.set_string("DisplayName", "Rustup: the Rust toolchain installer")
         .context("Failed to set `DisplayName`")?;
     do_update_programs_display_version(env!("CARGO_PKG_VERSION"))?;
@@ -641,22 +637,13 @@ pub(crate) fn do_remove_from_programs() -> Result<()> {
     }
 }
 
-/// Convert a vector UCS-2 chars to a null-terminated UCS-2 string in bytes
-pub(crate) fn to_winreg_bytes(mut v: Vec<u16>) -> Vec<u8> {
-    v.push(0);
-    unsafe { slice::from_raw_parts(v.as_ptr().cast::<u8>(), v.len() * 2).to_vec() }
-}
-
 /// This is used to decode the value of HKCU\Environment\PATH. If that key is
 /// not REG_SZ | REG_EXPAND_SZ then this returns None. The winreg library itself
 /// does a lossy unicode conversion.
 pub(crate) fn from_winreg_value(val: Value) -> Option<Vec<u16>> {
     match val.ty() {
         Type::String | Type::ExpandString => {
-            // Copied from winreg
-            let mut words = unsafe {
-                slice::from_raw_parts(val.as_ptr().cast::<u16>(), val.as_ref().len() / 2).to_owned()
-            };
+            let mut words = Vec::from(val.as_wide());
             while words.last() == Some(&0) {
                 words.pop();
             }
@@ -922,7 +909,8 @@ mod tests {
         let environment = CURRENT_USER.create("Environment").unwrap();
         let path = environment.get_value("PATH").unwrap();
         assert_eq!(path.ty(), Type::ExpandString);
-        assert_eq!(super::to_winreg_bytes(wide("foo")), path.as_ref());
+
+        assert_eq!(wide("foo\0"), path.as_wide());
     }
 
     #[test]
@@ -932,11 +920,7 @@ mod tests {
         let _guard = RegistryGuard::new(&USER_PATH);
         let environment = CURRENT_USER.create("Environment").unwrap();
         environment
-            .set_bytes(
-                "PATH",
-                Type::ExpandString,
-                &super::to_winreg_bytes(wide("foo")),
-            )
+            .set_expand_hstring("PATH", &HSTRING::from("foo"))
             .unwrap();
 
         {
