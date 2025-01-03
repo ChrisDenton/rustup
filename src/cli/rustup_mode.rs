@@ -1100,13 +1100,16 @@ fn show_active_toolchain(cfg: &Cfg<'_>, verbose: bool) -> Result<utils::ExitCode
                     toolchain.path().display(),
                 )?;
             }
+            Ok(utils::ExitCode(0))
         }
-        None => writeln!(
-            cfg.process.stdout().lock(),
-            "There isn't an active toolchain"
-        )?,
+        None => {
+            writeln!(
+                cfg.process.stderr().lock(),
+                "There isn't an active toolchain"
+            )?;
+            Ok(utils::ExitCode(1))
+        }
     }
-    Ok(utils::ExitCode(0))
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
