@@ -1057,9 +1057,12 @@ fn show(cfg: &Cfg<'_>, verbose: bool) -> Result<utils::ExitCode> {
                 for target in active_toolchain_targets {
                     writeln!(t.lock(), "  {}", target)?;
                 }
+                return Ok(utils::ExitCode(0));
             }
             None => {
-                writeln!(t.lock(), "no active toolchain")?;
+                drop(t);
+                writeln!(cfg.process.stderr().lock(), "no active toolchain")?;
+                return Ok(utils::ExitCode(1));
             }
         }
     }
@@ -1077,8 +1080,6 @@ fn show(cfg: &Cfg<'_>, verbose: bool) -> Result<utils::ExitCode> {
         t.reset()?;
         Ok(())
     }
-
-    Ok(utils::ExitCode(0))
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
